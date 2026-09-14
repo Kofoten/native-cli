@@ -34,6 +34,45 @@ internal class CodeBuilder
         sb.Append(text);
     }
 
+    public void AppendTypeName<T>(bool applyIndent = false)
+    {
+        Type type = typeof(T);
+        Append("global::", applyIndent);
+        if (!string.IsNullOrEmpty(type.Namespace))
+        {
+            Append($"{type.Namespace}.", false);
+        }
+        Append(type.Name, false);
+    }
+
+    public void DeclareVariable<T>(string name, string? initialValue = null, bool applyIndent = true, bool addTrailingSemicolon = true, params string[] modifiers)
+    {
+        Type type = typeof(T);
+
+        for (int i = 0; i < modifiers.Length; i++)
+        {
+            Append($"{modifiers[i]} ", applyIndent && i == 0);
+        }
+
+        Append("global::", applyIndent && modifiers.Length == 0);
+        if (!string.IsNullOrEmpty(type.Namespace))
+        {
+            Append($"{type.Namespace}.", false);
+        }
+
+        Append($"{type.Name} {name}", false);
+
+        if (initialValue is not null)
+        {
+            Append($" = {initialValue}", false);
+        }
+
+        if (addTrailingSemicolon)
+        {
+            AppendLine(";", false);
+        }
+    }
+
     public IDisposable StartBlock(bool addTrailingSemicolon = false)
     {
         AppendLine("{");

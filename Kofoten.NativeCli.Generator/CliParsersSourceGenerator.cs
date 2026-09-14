@@ -1307,20 +1307,26 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                     }
 
+                    var knownLongOptions = string.Join(", ", options.Select(o => $"\"{o.OptionName}\""));
+                    var knownShortOptions = string.Join(", ", options.Where(o => o.ShortName.HasValue).Select(o => $"'{o.ShortName}'"));
+
+                    //code.AppendLine("int segmentEnd = args.Offset + args.Count;");
+                    //code.AppendLine("for (int i = args.Offset; i < segmentEnd; i++)");
+
                     code.AppendLine();
-                    code.AppendLine("int segmentEnd = args.Offset + args.Count;");
                     code.AppendLine("int state = -1;");
                     code.AppendLine("int argIndex = 0;");
-                    code.AppendLine("for (int i = args.Offset; i < segmentEnd; i++)");
+                    code.AppendLine($"global::System.Collections.Generic.IEnumerable<global::Kofoten.NativeCli.Internal.CliToken> tokens = global::Kofoten.NativeCli.Internal.CliTokenizer.Tokenize(args, new string[] {{{knownLongOptions}}}, new char[] {{{knownShortOptions}}});");
+                    code.AppendLine("foreach (global::Kofoten.NativeCli.Internal.CliToken token in tokens)");
                     using (code.StartBlock())
                     {
                         code.AppendLine("if (state > -2)");
                         using (code.StartBlock())
                         {
-                            code.AppendLine("switch (args.Array[i])");
+                            code.AppendLine("switch (token.Type)");
                             using (code.StartBlock())
                             {
-                                code.AppendLine("case \"--\":");
+                                code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.EndOfOptions:");
                                 using (code.Indent())
                                 {
                                     code.AppendLine("state = -2;");

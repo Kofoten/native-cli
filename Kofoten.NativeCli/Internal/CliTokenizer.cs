@@ -1,13 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Kofoten.NativeCli.Internal;
 
+/// <summary>
+/// Provides functionality to tokenize command-line arguments into a sequence of <see cref="CliToken"/> instances, identifying options, values, and special markers based on known long and short options.
+/// </summary>
 public static class CliTokenizer
 {
+    /// <summary>
+    /// Tokenizes the specified command-line arguments.
+    /// </summary>
+    /// <param name="args">The command-line arguments to tokenize.</param>
+    /// <param name="knownLongOptions">An array of known long option names.</param>
+    /// <param name="knownShortOptions">An array of known short option characters.</param>
+    /// <returns>An enumerable sequence of <see cref="CliToken"/> instances representing the tokenized arguments.</returns>
     public static IEnumerable<CliToken> Tokenize(ArraySegment<string> args, string[] knownLongOptions, char[] knownShortOptions)
     {
-        for (int i = args.Offset; i < args.Array.Length; i++)
+        for (int i = args.Offset; i < args.Offset + args.Count; i++)
         {
             if (args.Array[i].StartsWith("--"))
             {
@@ -16,28 +27,41 @@ public static class CliTokenizer
                     yield return new CliToken(CliTokenType.EndOfOptions, i, 0, 2);
                 }
 
-                if (knownLongOptions.Contains(args.Array[i]))
+                int equalsIndex = args.Array[i].IndexOf('=');
+                int optionLength = (equalsIndex == -1 ? args.Array[i].Length : equalsIndex) - 2;
+                if (IsKnownLongOption(args.Array[i], optionLength, knownLongOptions))
                 {
-                    yield return new CliToken(CliTokenType.KnownOption, i, 0, args.Array[i].Length);
+                    yield return new CliToken(CliTokenType.Option, i, 2, optionLength + 2);
                 }
                 else
                 {
-                    yield return new CliToken(CliTokenType.UnknownLongOption, i, 0, args.Array[i].Length);
+                    yield return new CliToken(CliTokenType.UnknownOption, i, 2, optionLength + 2);
+                }
+
+                if (equalsIndex != -1)
+                {
+                    yield return new CliToken(CliTokenType.Value, i, equalsIndex + 1, args.Array[i].Length - equalsIndex - 1);
                 }
             }
             else if (args.Array[i].StartsWith("-") && args.Array[i].Length > 1)
             {
-                for (int j = 1; j < args.Array[i].Length; j++)
+                int equalsIndex = args.Array[i].IndexOf('=');
+                int optionEndIndex = equalsIndex == -1 ? args.Array[i].Length : equalsIndex;
+                for (int j = 1; j < optionEndIndex; j++)
                 {
-                    char option = args.Array[i][j];
-                    if (knownShortOptions.Contains(option))
+                    if (knownShortOptions.Contains(args.Array[i][j]))
                     {
-                        yield return new CliToken(CliTokenType.ShortOption, i, j, 1);
+                        yield return new CliToken(CliTokenType.Option, i, j, 1);
                     }
                     else
                     {
-                        yield return new CliToken(CliTokenType.UnknownShortOption, i, j, 1);
+                        yield return new CliToken(CliTokenType.UnknownOption, i, j, 1);
                     }
+                }
+
+                if (equalsIndex != -1)
+                {
+                    yield return new CliToken(CliTokenType.Value, i, equalsIndex + 1, args.Array[i].Length - equalsIndex - 1);
                 }
             }
             else
@@ -47,22 +71,18 @@ public static class CliTokenizer
         }
     }
 
-    private static bool OptionsEquals(int hyphenCount, string option, string knownOption)
+    private static bool IsKnownLongOption(string arg, int optionLength, string[] knownLongOptions)
     {
-        var optionLength = option.Length - hyphenCount;
-        if (optionLength != knownOption.Length)
+        for (int i = 0; i < knownLongOptions.Length; i++)
         {
-            return false;
-        }
-
-        for (int i = 0; i < optionLength; i++)
-        {
-            if (option[i + hyphenCount] != knownOption[i])
+            if (optionLength == knownLongOptions[i].Length
+                &&
+                string.Compare(arg, 2, knownLongOptions[i], 0, optionLength, StringComparison.Ordinal) == 0)
             {
-                return false;
+                return true;
             }
         }
 
-        return true;
+        return false;
     }
 }

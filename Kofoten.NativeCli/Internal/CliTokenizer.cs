@@ -18,12 +18,18 @@ public static class CliTokenizer
     /// <returns>An enumerable sequence of <see cref="CliToken"/> instances representing the tokenized arguments.</returns>
     public static IEnumerable<CliToken> Tokenize(ArraySegment<string> args, string[] knownLongOptions, char[] knownShortOptions)
     {
+        bool endOfOptionsEncountered = false;
         for (int i = args.Offset; i < args.Offset + args.Count; i++)
         {
-            if (args.Array[i].StartsWith("--"))
+            if (endOfOptionsEncountered)
+            {
+                yield return new CliToken(CliTokenType.Value, i, 0, args.Array[i].Length);
+            }
+            else if (args.Array[i].StartsWith("--"))
             {
                 if (args.Array[i] == "--")
                 {
+                    endOfOptionsEncountered = true;
                     yield return new CliToken(CliTokenType.EndOfOptions, i, 0, 2);
                 }
 

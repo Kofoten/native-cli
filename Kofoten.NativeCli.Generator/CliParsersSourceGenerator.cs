@@ -1276,6 +1276,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     code.AppendLine();
 
                     code.AppendLine("global::System.Collections.Generic.List<global::System.String> errors = new global::System.Collections.Generic.List<global::System.String>();");
+                    code.AppendLine("global::System.Collections.Generic.List<global::System.String> argumentBuffer = new global::System.Collections.Generic.List<global::System.String>();");
                     code.AppendLine();
 
                     foreach (var arg in arguments)
@@ -1333,34 +1334,77 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     code.AppendLine("break;");
                                 }
 
-                                for (int i = 0; i < options.Count; i++)
+                                code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.Option:");
+                                using (code.Indent())
                                 {
-                                    var opt = options[i];
-
-                                    if (!string.IsNullOrEmpty(opt.OptionName))
+                                    code.AppendLine("switch (token.GetTokenString(args))");
+                                    using (code.StartBlock())
                                     {
-                                        code.AppendLine($"case \"--{opt.OptionName}\":");
-                                    }
-
-                                    if (opt.ShortName.HasValue)
-                                    {
-                                        code.AppendLine($"case \"-{opt.ShortName}\":");
-                                    }
-
-                                    using (code.Indent())
-                                    {
-                                        code.AppendLine($"state = {i + 1};");
-                                        if (opt.TypeName == "bool")
+                                        for (int i = 0; i < options.Count; i++)
                                         {
-                                            code.AppendLine($"opt_{opt.Name} = true;");
+                                            var opt = options[i];
+
+                                            if (!string.IsNullOrEmpty(opt.OptionName))
+                                            {
+                                                code.AppendLine($"case \"{opt.OptionName}\":");
+                                            }
+
+                                            if (opt.ShortName.HasValue)
+                                            {
+                                                code.AppendLine($"case \"{opt.ShortName}\":");
+                                            }
+
+                                            using (code.Indent())
+                                            {
+                                                code.AppendLine($"state = {i + 1};");
+                                                if (opt.SpecialType == SpecialType.System_Boolean)
+                                                {
+                                                    code.AppendLine($"opt_{opt.Name} = true;");
+                                                }
+                                                else if (opt.ImplicitValueString is not null)
+                                                {
+                                                    GenerateImplicitValueAssignment(code, opt.ImplicitValueString, opt);
+                                                }
+                                                code.AppendLine("continue;");
+                                            }
                                         }
-                                        else if (opt.ImplicitValueString is not null)
-                                        {
-                                            GenerateImplicitValueAssignment(code, opt.ImplicitValueString, opt);
-                                        }
-                                        code.AppendLine("continue;");
                                     }
                                 }
+
+                                code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.Value:");
+                                using (code.Indent())
+                                {
+                                    code.AppendLine("")
+                                    code.AppendLine("switch (state)");
+                                    using (code.StartBlock())
+                                    {
+                                        for (int i = 0; i < options.Count; i++)
+                                        {
+                                            var opt = options[i];
+                                            int stateId = i + 1;
+
+                                            code.AppendLine($"case {stateId}:");
+                                            using (code.Indent())
+                                            {
+                                                GenerateParser(code, opt);
+
+                                                if (!opt.IsCollection && !opt.IsDictionary && !opt.IsFlagsEnum)
+                                                {
+                                                    code.AppendLine("state = 0;");
+                                                }
+
+                                                code.AppendLine("break;");
+                                            }
+                                        }
+
+                                        code.AppendLine("default:");
+                                        using (code.Indent())
+                                        {
+                                            code.AppendLine("break;");
+                                        }
+                                    }
+                                }
+
 
                                 code.AppendLine("default:");
                                 using (code.Indent())
@@ -1375,34 +1419,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             }
 
                             code.AppendLine();
-                            code.AppendLine("switch (state)");
-                            using (code.StartBlock())
-                            {
-                                for (int i = 0; i < options.Count; i++)
-                                {
-                                    var opt = options[i];
-                                    int stateId = i + 1;
 
-                                    code.AppendLine($"case {stateId}:");
-                                    using (code.Indent())
-                                    {
-                                        GenerateParser(code, opt);
-
-                                        if (!opt.IsCollection && !opt.IsDictionary && !opt.IsFlagsEnum)
-                                        {
-                                            code.AppendLine("state = 0;");
-                                        }
-
-                                        code.AppendLine("break;");
-                                    }
-                                }
-
-                                code.AppendLine("default:");
-                                using (code.Indent())
-                                {
-                                    code.AppendLine("break;");
-                                }
-                            }
+                        }
+                        code.AppendLine("else");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine("argumentBuffer.Add(token.GetTokenString(args));");
                         }
 
                         code.AppendLine();

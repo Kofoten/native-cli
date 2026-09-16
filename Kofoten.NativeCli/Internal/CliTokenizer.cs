@@ -37,11 +37,11 @@ public static class CliTokenizer
                 int optionLength = (equalsIndex == -1 ? args.Array[i].Length : equalsIndex) - 2;
                 if (IsKnownLongOption(args.Array[i], optionLength, knownLongOptions))
                 {
-                    yield return new CliToken(CliTokenType.Option, i, 2, optionLength + 2);
+                    yield return new CliToken(CliTokenType.Option, i, 2, optionLength);
                 }
                 else
                 {
-                    yield return new CliToken(CliTokenType.UnknownOption, i, 2, optionLength + 2);
+                    yield return new CliToken(CliTokenType.UnknownOption, i, 2, optionLength);
                 }
 
                 if (equalsIndex != -1)

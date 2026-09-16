@@ -1311,10 +1311,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     var knownLongOptions = string.Join(", ", options.Select(o => $"\"{o.OptionName}\""));
                     var knownShortOptions = string.Join(", ", options.Where(o => o.ShortName.HasValue).Select(o => $"'{o.ShortName}'"));
 
-                    //code.AppendLine("int segmentEnd = args.Offset + args.Count;");
-                    //code.AppendLine("for (int i = args.Offset; i < segmentEnd; i++)");
-
                     code.AppendLine();
+                    code.AppendLine("global::System.Boolean isImplicit = false;");
+                    code.AppendLine("global::System.Boolean isMultiValue = false;");
+                    code.AppendLine("global::Kofoten.NativeCli.Internal.CliToken previousOption = default;");
                     code.AppendLine("int state = -1;");
                     code.AppendLine("int argIndex = 0;");
                     code.AppendLine($"global::System.Collections.Generic.IEnumerable<global::Kofoten.NativeCli.Internal.CliToken> tokens = global::Kofoten.NativeCli.Internal.CliTokenizer.Tokenize(args, new string[] {{{knownLongOptions}}}, new char[] {{{knownShortOptions}}});");
@@ -1330,6 +1330,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                 code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.EndOfOptions:");
                                 using (code.Indent())
                                 {
+                                    code.AppendLine("if (state > 0 && !isImplicit)");
+                                    using (code.StartBlock())
+                                    {
+                                        code.AppendLine("errors.Add($\"Expected a value for option {previousOption.GetTokenString(args)}\");");
+                                    }
+
                                     code.AppendLine("state = -2;");
                                     code.AppendLine("break;");
                                 }
@@ -1337,6 +1343,15 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                 code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.Option:");
                                 using (code.Indent())
                                 {
+                                    code.AppendLine("if (state > 0 && !isImplicit && !isMultiValue)");
+                                    using (code.StartBlock())
+                                    {
+                                        code.AppendLine("errors.Add($\"Expected a value for option {previousOption.GetTokenString(args)}\");");
+                                    }
+
+                                    code.AppendLine();
+                                    code.AppendLine("isImplicit = false;");
+                                    code.AppendLine();
                                     code.AppendLine("switch (token.GetTokenString(args))");
                                     using (code.StartBlock())
                                     {
@@ -1360,21 +1375,34 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                                 if (opt.SpecialType == SpecialType.System_Boolean)
                                                 {
                                                     code.AppendLine($"opt_{opt.Name} = true;");
+                                                    code.AppendLine("isImplicit = true;");
                                                 }
                                                 else if (opt.ImplicitValueString is not null)
                                                 {
                                                     GenerateImplicitValueAssignment(code, opt.ImplicitValueString, opt);
+                                                    code.AppendLine("isImplicit = true;");
+                                                }
+
+                                                if (opt.IsFlagsEnum || opt.IsCollection || opt.IsDictionary)
+                                                {
+                                                    code.AppendLine("isMultiValue = true;");
+                                                }
+                                                else
+                                                {
+                                                    code.AppendLine("isMultiValue = false;");
                                                 }
                                                 code.AppendLine("continue;");
                                             }
                                         }
                                     }
+
+                                    code.AppendLine("previousOption = token;");
+                                    code.AppendLine("break;");
                                 }
 
                                 code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.Value:");
                                 using (code.Indent())
                                 {
-                                    code.AppendLine("")
                                     code.AppendLine("switch (state)");
                                     using (code.StartBlock())
                                     {
@@ -1392,7 +1420,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                                 {
                                                     code.AppendLine("state = 0;");
                                                 }
-
                                                 code.AppendLine("break;");
                                             }
                                         }
@@ -1403,8 +1430,16 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                             code.AppendLine("break;");
                                         }
                                     }
+
+                                    code.AppendLine("break;");
                                 }
 
+                                code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.UnknownOption:");
+                                using (code.Indent())
+                                {
+                                    code.AppendLine("errors.Add($\"Unknown option {token.GetTokenString(args)}\");");
+                                    code.AppendLine("break;");
+                                }
 
                                 code.AppendLine("default:");
                                 using (code.Indent())
@@ -1412,7 +1447,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     code.AppendLine("if (state == 0)");
                                     using (code.StartBlock())
                                     {
-                                        code.AppendLine("errors.Add($\"Unknown option {args.Array[i]}\");");
+                                        code.AppendLine("errors.Add($\"Invalid argument {token.GetTokenString(args)}\");");
                                     }
                                     code.AppendLine("break;");
                                 }
@@ -1790,12 +1825,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             case ArgumentPropertyModel argModel:
                 if (argModel.SpecialType == SpecialType.System_String)
                 {
-                    code.AppendLine($"arg_{argModel.Name} = args.Array[i];");
+                    code.AppendLine($"arg_{argModel.Name} = token.GetTokenString(args);");
                     break;
                 }
                 else if (argModel.IsEnum)
                 {
-                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>(args.Array[i], true, out arg_{argModel.Name}))", applyIndent: true);
+                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>(token.GetTokenString(args), true, out arg_{argModel.Name}))", applyIndent: true);
                     using (code.StartBlock())
                     {
                         code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
@@ -1803,7 +1838,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 else
                 {
-                    code.Append($"if (!{argModel.ValueParseMethodName}(args.Array[i], out arg_{argModel.Name}", applyIndent: true);
+                    code.Append($"if (!{argModel.ValueParseMethodName}(token.GetTokenString(args), out arg_{argModel.Name}", applyIndent: true);
                     if (argModel.ValueHasErrorMessageOut)
                     {
                         code.AppendLine(", out global::System.String customError))", applyIndent: false);
@@ -1825,13 +1860,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             case OptionPropertyModel optModel:
                 if (optModel.SpecialType == SpecialType.System_String)
                 {
-                    code.AppendLine($"opt_{optModel.Name} = args.Array[i];");
+                    code.AppendLine($"opt_{optModel.Name} = token.GetTokenString(args);");
                     break;
                 }
 
                 if (optModel.ValueSpecialType == SpecialType.System_String && optModel.IsCollection)
                 {
-                    code.AppendLine($"opt_{optModel.Name}.Add(args.Array[i]);");
+                    code.AppendLine($"opt_{optModel.Name}.Add(token.GetTokenString(args));");
                     break;
                 }
 
@@ -1840,19 +1875,19 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     IDisposable? dictionaryBlock = null;
                     if (optModel.IsEnum)
                     {
-                        code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(args.Array[i], true, out {optModel.ValueTypeName} v))");
+                        code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(token.GetTokenString(args), true, out {optModel.ValueTypeName} v))");
                     }
                     else
                     {
                         if (optModel.IsDictionary)
                         {
-                            code.AppendLine("global::System.String currentArg = args.Array[i];");
+                            code.AppendLine("global::System.String currentArg = token.GetTokenString(args);");
                             code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
                             code.AppendLine();
                             code.AppendLine("if (delimiterIndex == -1)");
                             using (code.StartBlock())
                             {
-                                code.AppendLine($"errors.Add($\"Invalid format ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}. A key value pair must be delimitered using the equals sign.\");");
+                                code.AppendLine($"errors.Add($\"Invalid format ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}. A key value pair must be delimitered using the equals sign.\");");
                             }
                             code.AppendLine("else");
                             dictionaryBlock = code.StartBlock();
@@ -1880,7 +1915,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     }
                                     else
                                     {
-                                        code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                        code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
                                     }
                                     code.AppendLine("isValidKVP = false;");
                                 }
@@ -1913,7 +1948,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     }
                                     else
                                     {
-                                        code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                        code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
                                     }
                                     code.AppendLine("isValidKVP = false;");
                                 }
@@ -1925,7 +1960,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                         else
                         {
-                            code.Append($"if ({optModel.ValueParseMethodName}(args.Array[i], out {optModel.ValueTypeName} v", applyIndent: true);
+                            code.Append($"if ({optModel.ValueParseMethodName}(token.GetTokenString(args), out {optModel.ValueTypeName} v", applyIndent: true);
 
                             if (optModel.ValueHasErrorMessageOut)
                             {
@@ -1970,7 +2005,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             }
                             else
                             {
-                                code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
                             }
                         }
                     }

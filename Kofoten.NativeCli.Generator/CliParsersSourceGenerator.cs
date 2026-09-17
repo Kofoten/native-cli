@@ -265,8 +265,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 bool isEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
                 bool isFlagsEnum = false;
                 bool isCollection = false;
-                CollectionType collectionType = CollectionType.None;
                 bool isDictionary = false;
+                CollectionType collectionType = CollectionType.None;
 
                 if (!isString && TryGetEnumerableElementType(member.Type, nativeCliContext, out var elementType))
                 {
@@ -475,15 +475,21 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         Name: member.Name,
                         TypeName: typeName,
                         ValueTypeName: valueTypeName,
+                        KeyTypeName: keyTypeName,
                         SpecialType: valueTypeSymbol.SpecialType,
                         KeySpecialType: keyTypeSymbol?.SpecialType ?? SpecialType.None,
                         ValueSpecialType: valueTypeSymbol.SpecialType,
-                        IsRequired: member.IsRequired,
                         Description: description,
                         ValueParseMethodName: valueParserMethodName,
                         ValueHasErrorMessageOut: valueHasErrorMessageOut,
-                        Position: position,
-                        IsEnum: isEnum));
+                        KeyParseMethodName: keyParserMethodName,
+                        KeyHasErrorMessageOut: keyHasErrorMessageOut,
+                        IsCollection: isCollection,
+                        IsDictionary: isDictionary,
+                        CollectionType: collectionType,
+                        IsEnum: isEnum,
+                        IsFlagsEnum: isFlagsEnum,
+                        Position: position));
                 }
                 else if (optAttribute != null
                     &&
@@ -546,8 +552,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         OptionName: optName,
                         ShortName: shortName,
                         IsCollection: isCollection,
-                        CollectionType: collectionType,
                         IsDictionary: isDictionary,
+                        CollectionType: collectionType,
                         IsEnum: isEnum,
                         IsFlagsEnum: isFlagsEnum,
                         Hidden: hidden,
@@ -1281,7 +1287,18 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                     foreach (var arg in arguments)
                     {
-                        code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default;");
+                        if (arg.IsDictionary)
+                        {
+                            code.AppendLine($"global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{arg.KeyTypeName}, {arg.ValueTypeName}>> arg_{arg.Name} = new();");
+                        }
+                        else if (arg.IsCollection)
+                        {
+                            code.AppendLine($"global::System.Collections.Generic.List<{arg.ValueTypeName}> arg_{arg.Name} = new();");
+                        }
+                        else
+                        {
+                            code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default!;");
+                        }
                     }
 
                     foreach (var opt in options)
@@ -1306,6 +1323,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         {
                             code.AppendLine($"{opt.TypeName} opt_{opt.Name} = default!;");
                         }
+
+                        if (opt.IsFlagsEnum)
+                        {
+                            code.AppendLine($"global::System.Boolean opt_{opt.Name}_touched = false;");
+                        }
                     }
 
                     var knownLongOptions = string.Join(", ", options.Select(o => $"\"{o.OptionName}\""));
@@ -1316,181 +1338,178 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     code.AppendLine("global::System.Boolean isMultiValue = false;");
                     code.AppendLine("global::Kofoten.NativeCli.Internal.CliToken previousOption = default;");
                     code.AppendLine("int state = -1;");
-                    code.AppendLine("int argIndex = 0;");
                     code.AppendLine($"global::System.Collections.Generic.IEnumerable<global::Kofoten.NativeCli.Internal.CliToken> tokens = global::Kofoten.NativeCli.Internal.CliTokenizer.Tokenize(args, new string[] {{{knownLongOptions}}}, new char[] {{{knownShortOptions}}});");
                     code.AppendLine("foreach (global::Kofoten.NativeCli.Internal.CliToken token in tokens)");
                     using (code.StartBlock())
                     {
-                        code.AppendLine("if (state > -2)");
+                        code.AppendLine("switch (token.Type)");
                         using (code.StartBlock())
                         {
-                            code.AppendLine("switch (token.Type)");
-                            using (code.StartBlock())
+                            code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.EndOfOptions:");
+                            using (code.Indent())
                             {
-                                code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.EndOfOptions:");
-                                using (code.Indent())
+                                code.AppendLine("if (state > 0 && !isImplicit)");
+                                using (code.StartBlock())
                                 {
-                                    code.AppendLine("if (state > 0 && !isImplicit)");
-                                    using (code.StartBlock())
-                                    {
-                                        code.AppendLine("errors.Add($\"Expected a value for option {previousOption.GetTokenString(args)}\");");
-                                    }
-
-                                    code.AppendLine("state = -2;");
-                                    code.AppendLine("break;");
+                                    code.AppendLine("errors.Add($\"Expected a value for option {previousOption.GetTokenString(args)}\");");
                                 }
 
-                                code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.Option:");
-                                using (code.Indent())
+                                code.AppendLine("state = -2;");
+                                code.AppendLine("break;");
+                            }
+
+                            code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.Option:");
+                            using (code.Indent())
+                            {
+                                code.AppendLine("if (state > 0 && !isImplicit && !isMultiValue)");
+                                using (code.StartBlock())
                                 {
-                                    code.AppendLine("if (state > 0 && !isImplicit && !isMultiValue)");
-                                    using (code.StartBlock())
-                                    {
-                                        code.AppendLine("errors.Add($\"Expected a value for option {previousOption.GetTokenString(args)}\");");
-                                    }
-
-                                    code.AppendLine();
-                                    code.AppendLine("isImplicit = false;");
-                                    code.AppendLine();
-                                    code.AppendLine("switch (token.GetTokenString(args))");
-                                    using (code.StartBlock())
-                                    {
-                                        for (int i = 0; i < options.Count; i++)
-                                        {
-                                            var opt = options[i];
-
-                                            if (!string.IsNullOrEmpty(opt.OptionName))
-                                            {
-                                                code.AppendLine($"case \"{opt.OptionName}\":");
-                                            }
-
-                                            if (opt.ShortName.HasValue)
-                                            {
-                                                code.AppendLine($"case \"{opt.ShortName}\":");
-                                            }
-
-                                            using (code.Indent())
-                                            {
-                                                code.AppendLine($"state = {i + 1};");
-                                                if (opt.SpecialType == SpecialType.System_Boolean)
-                                                {
-                                                    code.AppendLine($"opt_{opt.Name} = true;");
-                                                    code.AppendLine("isImplicit = true;");
-                                                }
-                                                else if (opt.ImplicitValueString is not null)
-                                                {
-                                                    GenerateImplicitValueAssignment(code, opt.ImplicitValueString, opt);
-                                                    code.AppendLine("isImplicit = true;");
-                                                }
-
-                                                if (opt.IsFlagsEnum || opt.IsCollection || opt.IsDictionary)
-                                                {
-                                                    code.AppendLine("isMultiValue = true;");
-                                                }
-                                                else
-                                                {
-                                                    code.AppendLine("isMultiValue = false;");
-                                                }
-                                                code.AppendLine("continue;");
-                                            }
-                                        }
-                                    }
-
-                                    code.AppendLine("previousOption = token;");
-                                    code.AppendLine("break;");
+                                    code.AppendLine("errors.Add($\"Expected a value for option {previousOption.GetTokenString(args)}\");");
                                 }
 
-                                code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.Value:");
-                                using (code.Indent())
+                                code.AppendLine();
+                                code.AppendLine("isImplicit = false;");
+                                code.AppendLine();
+                                code.AppendLine("switch (token.GetTokenString(args))");
+                                using (code.StartBlock())
                                 {
-                                    code.AppendLine("switch (state)");
-                                    using (code.StartBlock())
+                                    for (int i = 0; i < options.Count; i++)
                                     {
-                                        for (int i = 0; i < options.Count; i++)
+                                        var opt = options[i];
+
+                                        if (!string.IsNullOrEmpty(opt.OptionName))
                                         {
-                                            var opt = options[i];
-                                            int stateId = i + 1;
-
-                                            code.AppendLine($"case {stateId}:");
-                                            using (code.Indent())
-                                            {
-                                                GenerateParser(code, opt);
-
-                                                if (!opt.IsCollection && !opt.IsDictionary && !opt.IsFlagsEnum)
-                                                {
-                                                    code.AppendLine("state = 0;");
-                                                }
-                                                code.AppendLine("break;");
-                                            }
+                                            code.AppendLine($"case \"{opt.OptionName}\":");
                                         }
 
-                                        code.AppendLine("default:");
+                                        if (opt.ShortName.HasValue)
+                                        {
+                                            code.AppendLine($"case \"{opt.ShortName}\":");
+                                        }
+
                                         using (code.Indent())
                                         {
+                                            code.AppendLine($"state = {i + 1};");
+                                            if (opt.SpecialType == SpecialType.System_Boolean)
+                                            {
+                                                code.AppendLine($"opt_{opt.Name} = true;");
+                                                code.AppendLine("isImplicit = true;");
+                                            }
+                                            else if (opt.ImplicitValueString is not null)
+                                            {
+                                                GenerateImplicitValueAssignment(code, opt.ImplicitValueString, opt);
+                                                code.AppendLine("isImplicit = true;");
+                                            }
+
+                                            if (opt.IsFlagsEnum || opt.IsCollection || opt.IsDictionary)
+                                            {
+                                                code.AppendLine("isMultiValue = true;");
+                                            }
+                                            else
+                                            {
+                                                code.AppendLine("isMultiValue = false;");
+                                            }
                                             code.AppendLine("break;");
                                         }
                                     }
 
-                                    code.AppendLine("break;");
-                                }
-
-                                code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.UnknownOption:");
-                                using (code.Indent())
-                                {
-                                    code.AppendLine("errors.Add($\"Unknown option {token.GetTokenString(args)}\");");
-                                    code.AppendLine("break;");
-                                }
-
-                                code.AppendLine("default:");
-                                using (code.Indent())
-                                {
-                                    code.AppendLine("if (state == 0)");
-                                    using (code.StartBlock())
+                                    code.AppendLine("default:");
+                                    using (code.Indent())
                                     {
-                                        code.AppendLine("errors.Add($\"Invalid argument {token.GetTokenString(args)}\");");
+                                        code.AppendLine("errors.Add($\"Unknown option {token.GetTokenString(args)}\");");
+                                        code.AppendLine("state = 0;");
+                                        code.AppendLine("break;");
                                     }
-                                    code.AppendLine("break;");
                                 }
+
+                                code.AppendLine("previousOption = token;");
+                                code.AppendLine("break;");
                             }
 
-                            code.AppendLine();
+                            code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.Value:");
+                            using (code.Indent())
+                            {
+                                code.AppendLine("switch (state)");
+                                using (code.StartBlock())
+                                {
+                                    code.AppendLine("case -2:");
+                                    code.AppendLine("case -1:");
+                                    using (code.Indent())
+                                    {
+                                        code.AppendLine("argumentBuffer.Add(token.GetTokenString(args));");
+                                        code.AppendLine("break;");
+                                    }
 
+                                    code.AppendLine("case 0:");
+                                    using (code.Indent())
+                                    {
+                                        code.AppendLine("errors.Add($\"Expected option at position {token.Index}, instead received {token.GetTokenString(args)}\");");
+                                        code.AppendLine("break;");
+                                    }
+
+                                    for (int i = 0; i < options.Count; i++)
+                                    {
+                                        var opt = options[i];
+                                        int stateId = i + 1;
+
+                                        code.AppendLine($"case {stateId}:");
+                                        using (code.Indent())
+                                        {
+                                            GenerateOptionParser(code, opt);
+
+                                            if (!opt.IsCollection && !opt.IsDictionary && !opt.IsFlagsEnum)
+                                            {
+                                                code.AppendLine("state = 0;");
+                                            }
+                                            code.AppendLine("break;");
+                                        }
+                                    }
+
+                                    code.AppendLine("default:");
+                                    using (code.Indent())
+                                    {
+                                        code.AppendLine("break;");
+                                    }
+                                }
+
+                                code.AppendLine("break;");
+                            }
+
+                            code.AppendLine("case global::Kofoten.NativeCli.Internal.CliTokenType.UnknownOption:");
+                            using (code.Indent())
+                            {
+                                code.AppendLine("errors.Add($\"Unknown option {token.GetTokenString(args)}\");");
+                                code.AppendLine("break;");
+                            }
+
+                            code.AppendLine("default:");
+                            using (code.Indent())
+                            {
+                                code.AppendLine("if (state == 0)");
+                                using (code.StartBlock())
+                                {
+                                    code.AppendLine("errors.Add($\"Invalid argument {token.GetTokenString(args)}\");");
+                                }
+                                code.AppendLine("break;");
+                            }
+                        }
+                    }
+
+                    var multiValueArg = arguments.FirstOrDefault(a => a.IsCollection || a.IsDictionary || a.IsFlagsEnum);
+
+                    foreach (var arg in arguments)
+                    {
+                        code.AppendLine();
+                        code.AppendLine($"if (argumentBuffer.Count < {arg.Position + 1})");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine($"errors.Add($\"Missing required argument <{arg.Name}>\");");
                         }
                         code.AppendLine("else");
                         using (code.StartBlock())
                         {
-                            code.AppendLine("argumentBuffer.Add(token.GetTokenString(args));");
+                            GenerateArgumentParser(code, arg, "argumentBuffer");
                         }
-
-                        code.AppendLine();
-                        code.AppendLine("if (state < 0)");
-                        using (code.StartBlock())
-                        {
-                            code.AppendLine("switch (argIndex)");
-                            using (code.StartBlock())
-                            {
-                                for (int i = 0; i < arguments.Count; i++)
-                                {
-                                    var arg = arguments[i];
-
-                                    code.AppendLine($"case {i}:");
-                                    using (code.Indent())
-                                    {
-                                        GenerateParser(code, arg);
-                                        code.AppendLine("break;");
-                                    }
-                                }
-                            }
-
-                            code.AppendLine();
-                            code.AppendLine("argIndex++;");
-                        }
-                    }
-
-                    code.AppendLine($"if (argIndex < {arguments.Count})");
-                    using (code.StartBlock())
-                    {
-                        code.AppendLine($"errors.Add($\"Too few arguments: At least {arguments.Count} argument(s) are required\");");
                     }
 
                     code.AppendLine();
@@ -1557,7 +1576,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>(opt_{dictionaryOpt.Name});");
                                     break;
                                 case CollectionType.DictionaryCompatible:
-                                    code.AppendLine($"var finalOpt_{dictionaryOpt.Name} = global::Kofoten.NativeCli.Internal.GeneratorHelperSources.CreateDictionaryWithOverwrite<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>(opt_{dictionaryOpt.Name});");
+                                    code.AppendLine($"global::System.Collections.Generic.Dictionary<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}> finalOpt_{dictionaryOpt.Name} = global::Kofoten.NativeCli.Internal.GeneratorHelperSources.CreateDictionaryWithOverwrite<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>(opt_{dictionaryOpt.Name});");
                                     break;
                             }
                         }
@@ -1818,185 +1837,98 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         context.AddSource($"{command.ClassName}Parser.g.cs", code.ToString());
     }
 
-    private static void GenerateParser(CodeBuilder code, PropertyModel model)
+    private static void GenerateOptionParser(CodeBuilder code, OptionPropertyModel optModel)
     {
-        switch (model)
+        if (optModel.SpecialType == SpecialType.System_String)
         {
-            case ArgumentPropertyModel argModel:
-                if (argModel.SpecialType == SpecialType.System_String)
+            code.AppendLine($"opt_{optModel.Name} = token.GetTokenString(args);");
+            return;
+        }
+
+        if (optModel.ValueSpecialType == SpecialType.System_String && optModel.IsCollection)
+        {
+            code.AppendLine($"opt_{optModel.Name}.Add(token.GetTokenString(args));");
+            return;
+        }
+
+        using (code.StartBlock())
+        {
+            IDisposable? dictionaryBlock = null;
+            if (optModel.IsEnum)
+            {
+                code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(token.GetTokenString(args), true, out {optModel.ValueTypeName} v))");
+            }
+            else
+            {
+                if (optModel.IsDictionary)
                 {
-                    code.AppendLine($"arg_{argModel.Name} = token.GetTokenString(args);");
-                    break;
-                }
-                else if (argModel.IsEnum)
-                {
-                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>(token.GetTokenString(args), true, out arg_{argModel.Name}))", applyIndent: true);
+                    code.AppendLine("global::System.String currentArg = token.GetTokenString(args);");
+                    code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
+                    code.AppendLine();
+                    code.AppendLine("if (delimiterIndex == -1)");
                     using (code.StartBlock())
                     {
-                        code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
+                        code.AppendLine($"errors.Add($\"Invalid format ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}. A key value pair must be delimitered using the equals sign.\");");
                     }
-                }
-                else
-                {
-                    code.Append($"if (!{argModel.ValueParseMethodName}(token.GetTokenString(args), out arg_{argModel.Name}", applyIndent: true);
-                    if (argModel.ValueHasErrorMessageOut)
+                    code.AppendLine("else");
+                    dictionaryBlock = code.StartBlock();
+
+                    code.AppendLine("global::System.Boolean isValidKVP = true;");
+                    code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
+                    code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
+
+                    code.AppendLine();
+                    code.AppendLine("if (string.IsNullOrEmpty(keyPart))");
+                    using (code.StartBlock())
                     {
-                        code.AppendLine(", out global::System.String customError))", applyIndent: false);
-                        using (code.StartBlock())
+                        code.AppendLine($"errors.Add($\"Invalid format ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}. A key value pair must have a non-empty key.\");");
+                        code.AppendLine("isValidKVP = false;");
+                    }
+
+                    code.AppendLine();
+                    if (optModel.KeySpecialType != SpecialType.System_String)
+                    {
+                        code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
+
+                        if (optModel.KeyHasErrorMessageOut)
                         {
-                            code.AppendLine($"errors.Add(\"Failed to parse argument {argModel.Name}: {{customError}}\");");
+                            code.Append(", out global::System.String customError");
                         }
-                    }
-                    else
-                    {
+
                         code.AppendLine("))", applyIndent: false);
                         using (code.StartBlock())
                         {
-                            code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
+                            if (optModel.KeyHasErrorMessageOut)
+                            {
+                                code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
+                            }
+                            else
+                            {
+                                code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
+                            }
+                            code.AppendLine("isValidKVP = false;");
                         }
+
+                        code.AppendLine();
                     }
-                }
-                break;
-            case OptionPropertyModel optModel:
-                if (optModel.SpecialType == SpecialType.System_String)
-                {
-                    code.AppendLine($"opt_{optModel.Name} = token.GetTokenString(args);");
-                    break;
-                }
 
-                if (optModel.ValueSpecialType == SpecialType.System_String && optModel.IsCollection)
-                {
-                    code.AppendLine($"opt_{optModel.Name}.Add(token.GetTokenString(args));");
-                    break;
-                }
-
-                using (code.StartBlock())
-                {
-                    IDisposable? dictionaryBlock = null;
-                    if (optModel.IsEnum)
+                    if (optModel.ValueSpecialType != SpecialType.System_String)
                     {
-                        code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(token.GetTokenString(args), true, out {optModel.ValueTypeName} v))");
-                    }
-                    else
-                    {
-                        if (optModel.IsDictionary)
+                        code.Append($"if (!{optModel.ValueParseMethodName}(valuePart, out {optModel.ValueTypeName} v", applyIndent: true);
+
+                        if (optModel.ValueHasErrorMessageOut)
                         {
-                            code.AppendLine("global::System.String currentArg = token.GetTokenString(args);");
-                            code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
-                            code.AppendLine();
-                            code.AppendLine("if (delimiterIndex == -1)");
-                            using (code.StartBlock())
+                            if (optModel.KeyHasErrorMessageOut && optModel.KeySpecialType != SpecialType.System_String)
                             {
-                                code.AppendLine($"errors.Add($\"Invalid format ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}. A key value pair must be delimitered using the equals sign.\");");
+                                code.Append(", out customError");
                             }
-                            code.AppendLine("else");
-                            dictionaryBlock = code.StartBlock();
-
-                            code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
-                            code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
-                            code.AppendLine("global::System.Boolean isValidKVP = true;");
-                            code.AppendLine();
-
-                            if (optModel.KeySpecialType != SpecialType.System_String)
-                            {
-                                code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
-
-                                if (optModel.KeyHasErrorMessageOut)
-                                {
-                                    code.Append(", out global::System.String customError");
-                                }
-
-                                code.AppendLine("))", applyIndent: false);
-                                using (code.StartBlock())
-                                {
-                                    if (optModel.KeyHasErrorMessageOut)
-                                    {
-                                        code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
-                                    }
-                                    else
-                                    {
-                                        code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
-                                    }
-                                    code.AppendLine("isValidKVP = false;");
-                                }
-
-                                code.AppendLine();
-                            }
-
-                            if (optModel.ValueSpecialType != SpecialType.System_String)
-                            {
-                                code.Append($"if (!{optModel.ValueParseMethodName}(valuePart, out {optModel.ValueTypeName} v", applyIndent: true);
-
-                                if (optModel.ValueHasErrorMessageOut)
-                                {
-                                    if (optModel.KeyHasErrorMessageOut && optModel.KeySpecialType != SpecialType.System_String)
-                                    {
-                                        code.Append(", out customError");
-                                    }
-                                    else
-                                    {
-                                        code.Append(", out global::System.String customError");
-                                    }
-                                }
-
-                                code.AppendLine("))", applyIndent: false);
-                                using (code.StartBlock())
-                                {
-                                    if (optModel.ValueHasErrorMessageOut)
-                                    {
-                                        code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
-                                    }
-                                    else
-                                    {
-                                        code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
-                                    }
-                                    code.AppendLine("isValidKVP = false;");
-                                }
-
-                                code.AppendLine();
-                            }
-
-                            code.AppendLine("if (isValidKVP)");
-                        }
-                        else
-                        {
-                            code.Append($"if ({optModel.ValueParseMethodName}(token.GetTokenString(args), out {optModel.ValueTypeName} v", applyIndent: true);
-
-                            if (optModel.ValueHasErrorMessageOut)
+                            else
                             {
                                 code.Append(", out global::System.String customError");
                             }
+                        }
 
-                            code.AppendLine("))", applyIndent: false);
-                        }
-                    }
-
-                    using (code.StartBlock())
-                    {
-                        if (model.IsFlagsEnum)
-                        {
-                            code.AppendLine($"opt_{optModel.Name} |= v;");
-                        }
-                        else if (model.IsDictionary)
-                        {
-                            var keyName = optModel.KeySpecialType == SpecialType.System_String ? "keyPart" : "k";
-                            var valueName = optModel.ValueSpecialType == SpecialType.System_String ? "valuePart" : "v";
-
-                            code.AppendLine($"opt_{optModel.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{optModel.KeyTypeName}, {optModel.ValueTypeName}>({keyName}, {valueName}));");
-                        }
-                        else if (model.IsCollection)
-                        {
-                            code.AppendLine($"opt_{optModel.Name}.Add(v);");
-                        }
-                        else
-                        {
-                            code.AppendLine($"opt_{optModel.Name} = v;");
-                        }
-                    }
-
-                    if (!optModel.IsDictionary)
-                    {
-                        code.AppendLine("else");
+                        code.AppendLine("))", applyIndent: false);
                         using (code.StartBlock())
                         {
                             if (optModel.ValueHasErrorMessageOut)
@@ -2007,14 +1939,109 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             {
                                 code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
                             }
+                            code.AppendLine("isValidKVP = false;");
                         }
+
+                        code.AppendLine();
                     }
 
-                    dictionaryBlock?.Dispose();
+                    code.AppendLine("if (isValidKVP)");
                 }
-                break;
-            default:
-                break;
+                else
+                {
+                    code.Append($"if ({optModel.ValueParseMethodName}(token.GetTokenString(args), out {optModel.ValueTypeName} v", applyIndent: true);
+
+                    if (optModel.ValueHasErrorMessageOut)
+                    {
+                        code.Append(", out global::System.String customError");
+                    }
+
+                    code.AppendLine("))", applyIndent: false);
+                }
+            }
+
+            using (code.StartBlock())
+            {
+                if (optModel.IsFlagsEnum)
+                {
+                    code.AppendLine($"if (!opt_{optModel.Name}_touched)");
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine($"opt_{optModel.Name} = default;");
+                        code.AppendLine($"opt_{optModel.Name}_touched = true;");
+                    }
+                    code.AppendLine($"opt_{optModel.Name} |= v;");
+                }
+                else if (optModel.IsDictionary)
+                {
+                    var keyName = optModel.KeySpecialType == SpecialType.System_String ? "keyPart" : "k";
+                    var valueName = optModel.ValueSpecialType == SpecialType.System_String ? "valuePart" : "v";
+
+                    code.AppendLine($"opt_{optModel.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{optModel.KeyTypeName}, {optModel.ValueTypeName}>({keyName}, {valueName}));");
+                }
+                else if (optModel.IsCollection)
+                {
+                    code.AppendLine($"opt_{optModel.Name}.Add(v);");
+                }
+                else
+                {
+                    code.AppendLine($"opt_{optModel.Name} = v;");
+                }
+            }
+
+            if (!optModel.IsDictionary)
+            {
+                code.AppendLine("else");
+                using (code.StartBlock())
+                {
+                    if (optModel.ValueHasErrorMessageOut)
+                    {
+                        code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
+                    }
+                    else
+                    {
+                        code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
+                    }
+                }
+            }
+
+            dictionaryBlock?.Dispose();
+        }
+    }
+
+    private static void GenerateArgumentParser(CodeBuilder code, ArgumentPropertyModel argModel, string bufferName)
+    {
+        if (argModel.SpecialType == SpecialType.System_String)
+        {
+            code.AppendLine($"arg_{argModel.Name} = {bufferName}[{argModel.Position}];");
+        }
+        else if (argModel.IsEnum)
+        {
+            code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>({bufferName}[{argModel.Position}], true, out arg_{argModel.Name}))", applyIndent: true);
+            using (code.StartBlock())
+            {
+                code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
+            }
+        }
+        else
+        {
+            code.Append($"if (!{argModel.ValueParseMethodName}({bufferName}[{argModel.Position}], out arg_{argModel.Name}", applyIndent: true);
+            if (argModel.ValueHasErrorMessageOut)
+            {
+                code.AppendLine(", out global::System.String customError))", applyIndent: false);
+                using (code.StartBlock())
+                {
+                    code.AppendLine($"errors.Add(\"Failed to parse argument {argModel.Name}: {{customError}}\");");
+                }
+            }
+            else
+            {
+                code.AppendLine("))", applyIndent: false);
+                using (code.StartBlock())
+                {
+                    code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
+                }
+            }
         }
     }
 

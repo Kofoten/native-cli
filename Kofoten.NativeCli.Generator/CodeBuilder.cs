@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Kofoten.NativeCli.Generator;
@@ -8,7 +9,7 @@ internal class CodeBuilder
     private readonly StringBuilder sb = new();
     private int indent = 0;
 
-    public void AppendLine(string line = "", bool applyIndent = true)
+    public void AppendLine([StringSyntax(StringSyntaxAttribute.CSharp)] string line = "", bool applyIndent = true)
     {
         if (string.IsNullOrEmpty(line))
         {
@@ -24,7 +25,7 @@ internal class CodeBuilder
         sb.AppendLine(line);
     }
 
-    public void Append(string text, bool applyIndent = false)
+    public void Append([StringSyntax(StringSyntaxAttribute.CSharp)] string text, bool applyIndent = false)
     {
         if (applyIndent)
         {

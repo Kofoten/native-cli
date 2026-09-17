@@ -182,11 +182,19 @@ static int ExceptionHandler(Exception exception, IServiceProvider? sp)
 }
 ```
 
+## Syntax support
+
+The reccommended usage for end users it to follow the standard GNU style syntax for command line applications. This means that options are passed using a double dash (`--`) followed by the option name and a space, then the value. Short options can be passed using a single dash (`-`) followed by a single character and a space, then the value. Arguments are passed without any prefix and are positional.
+
+There are some key features borrowed from the POSIX standard, such as the use of `--` to indicate that all following values should be treated as arguments and not options. This is particularly useful when passing file paths or other values that may start with a dash or a double dash. It also allows for the use of multi value options, where the user can pass multiple values for a single option by repeating the option flag multiple times. Futhermore the key/value syntax is supported for options where the value of an option starts with a dash or double dash, which would otherwise be interpreted as an option flag. In this case the user can use the equals sign (`=`) to separate the key and value, for example `--option=-value` or `--option=--value`. Combining short options is supported, where the user can combine multiple short options into a single flag, for example `-abc` is equivalent to `-a -b -c`.
+
+However there are some limitations to this syntax, which are described in the [limitations](#limitations) section.
+
 ## Supported property types
 
 ### Single value types
 
-Any type that implements a public and static method with the name `TryParse`.  
+String and **any** type that implements a public and static method with the name `TryParse`.  
 There are two possible signatures that can be used:
 
 - `public static bool TryParse(string s, out T value)`
@@ -199,6 +207,8 @@ Implement the second version if you want to provide a specific error message to 
 Any single value **option** can have an implicit value. This value is automatically assigned if the user passes the option flag without providing an explicit value next to it.
 
 Note: This is different from a standard default value, which is applied when the user omits the option entirely.
+
+Note: The string representation of the implicit value must be parseable by the `TryParse` method of the property type or the custom parser specified using the `[CliParser]` attribute.
 
 You can configure this by providing the value's string representation to the `ImplicitValue` property on the `[CliOption]` attribute.
 
@@ -313,20 +323,19 @@ There are some limitations in what kind of cli that can be designed. Some limita
 - No rich console UI (There are many other great libraries out there and i have no interest in developing such).
 - No configuration file or environment variable binding (use existing builtin features).
 - Use of `--` is required to begin parsing arguments **after** options have been passed and no more options may follow, everything after `--` is treated as arguments.
+- All arguments are considered required, if you want to make an argument optional you must use an option instead.
+- Multiple multi value arguments are not supported. If you want to have multiple multi value arguments you must use options instead or combine options with the single multi value argument property.
 
 ### May change
 
-- Arguments are restricted to single value types.
-- There is no detection for unknown options. Example: The only existing option is `--hello`, if the user writes `--x` nothing will happen and if the user writes `--hello --x` then `--x` will be passed as the value of `--hello`.
 - No support for `-` to indicate reading from stdin.
 - No middleware or interception pipeline.
 - No global options (currently you can use an abstract `BaseCommand` to achieve similar functionality).
-- No combined flags, you can not combine short names like `-v`, `-y`, `-k` to `-vyk`.
 - Support for custom help text formatters.
 - Optional default version querying via `-v` and `--version` (app scoped, meaning top level router only).
 - No shell auto completions.
-- Does **not** support the key value option pattern, meaning `--name=Kofoten` is not supported. The value of an option must be separated from the option name using a space (`--name Kofoten`).
 - Does **not** support the comma separated multi value option pattern, meaning `--names Kofoten,Rasmus` is not supported except for flag enum values. The values must be separated using a space (`--names Kofoten Rasmus`).
+- Short options must use a space or equals sign to separate the option from the value, meaning `-nKofoten` is not supported, but `-n Kofoten` and `-n=Kofoten` are supported.
 
 ### Will change (probably)
 
@@ -350,3 +359,4 @@ To ensure a smooth developer experience, `Kofoten.NativeCli` includes a Roslyn a
 | **NCLI009** | Missing parser | The type of a CLI property does not have a valid parser (e.g., no compatible `TryParse` method or `[CliParser]` attribute). | Error |
 | **NCLI010** | Invalid command accessibility | The command class must be declared as public or internal. | Error |
 | **NCLI011** | Redundant default value | A required argument or option property should not have a default value assigned. | Warning |
+| **NCLI012** | Multiple multi-value arguments | Multiple multi value (e.g., array, list, dictionary or flags enum) properties are decorated with `[CliArgument]`. | Error |

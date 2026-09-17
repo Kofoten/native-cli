@@ -91,5 +91,13 @@ namespace Kofoten.NativeCli.Generator.Diagnostics
             category: "Kofoten.NativeCli.Generator",
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor MultipleMultiValueArguments = new(
+            id: "NCLI012",
+            title: "Multiple multi-value arguments",
+            messageFormat: "Property '{0}' is declared as a multi-value argument, but multiple multi-value arguments are not allowed",
+            category: "Kofoten.NativeCli.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
     }
 }

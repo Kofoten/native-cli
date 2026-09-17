@@ -11,7 +11,10 @@ internal class AdditionCommand(object imaginaryService) : BaseCommand
     [CliArgument(0, nameof(FirstNumber), Description = "The first number to add.")]
     public required int FirstNumber { get; init; }
 
-    [CliArgument(1, nameof(SecondNumber), Description = "The second number to add.")]
+    [CliArgument(1, nameof(ExtraNumbers), Description = "The first number to add.")]
+    public required List<int> ExtraNumbers { get; init; }
+
+    [CliArgument(2, nameof(SecondNumber), Description = "The second number to add.")]
     public required int SecondNumber { get; init; }
 
     [CliOption("additional-numbers", Short = 'a', Description = "Additional numbers to add.")]

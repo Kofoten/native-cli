@@ -4,7 +4,7 @@ using Kofoten.NativeCli.Test;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-string[] simulatedArgs = ["10", "20", "-a", "5", "15", "-Vt", "-w", "rainy,sunny", "snowy", "--weather", "cloudy", "--indexed-cheese", "7=Herrgård|Sweden", "--frozen-cheese", "Brie|France", "-l", "55", "-s", "Kofoten"];
+string[] simulatedArgs = ["10", "15", "20", "-a", "5", "15", "-Vt", "-w", "rainy,sunny", "snowy", "--weather", "cloudy", "--indexed-cheese", "7=Herrgård|Sweden", "--frozen-cheese", "Brie|France", "-l", "55", "-s", "Kofoten"];
 
 try
 {

@@ -220,6 +220,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     .Any(m => SymbolEqualityComparer.Default.Equals(m.ReturnType, nativeCliContext.CliValidationResultSymbol));
             }
 
+            var multiValueArgumentDetected = false;
             foreach (var member in currentClassSymbol.GetMembers().OfType<IPropertySymbol>())
             {
                 if (!processedPropertyNames.Add(member.Name))
@@ -238,7 +239,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                 if (argAttribute == null && optAttribute == null)
                 {
-                    // NOTE: Property is not decorated as a CLI option or argument and should therfore be skipped.
+                    // NOTE: Property is not decorated as a CLI option or argument and should therefore be skipped.
                     continue;
                 }
 
@@ -468,6 +469,22 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     &&
                     argAttribute.ConstructorArguments[0].Value is int position)
                 {
+                    if (isFlagsEnum || isCollection || isDictionary)
+                    {
+                        if (multiValueArgumentDetected)
+                        {
+                            diagnostics.Add(Diagnostic.Create(
+                                DiagnosticDescriptors.MultipleMultiValueArguments,
+                                member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                                member.Name));
+
+                            // NOTE: Skip property to avoid confusing the generator.
+                            continue;
+                        }
+
+                        multiValueArgumentDetected = true;
+                    }
+
                     var descriptionArg = argAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Description");
                     var description = descriptionArg.Value.Value is string d ? d : string.Empty;
 
@@ -529,7 +546,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                     if (implicitValue is not null && (isCollection || isDictionary))
                     {
-                        // TODO: Emit diagnostic for implicit value assignment not supported for this property type.
+                        diagnostics.Add(Diagnostic.Create(
+                            DiagnosticDescriptors.ImplicitValueNotSupported,
+                            member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                            member.Name));
                     }
 
                     properties.Add(new OptionPropertyModel(
@@ -1496,19 +1516,60 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
 
                     var multiValueArg = arguments.FirstOrDefault(a => a.IsCollection || a.IsDictionary || a.IsFlagsEnum);
-
-                    foreach (var arg in arguments)
+                    if (multiValueArg == null)
                     {
                         code.AppendLine();
-                        code.AppendLine($"if (argumentBuffer.Count < {arg.Position + 1})");
+                        code.AppendLine($"if (argumentBuffer.Count > {arguments.Count})");
                         using (code.StartBlock())
                         {
-                            code.AppendLine($"errors.Add($\"Missing required argument <{arg.Name}>\");");
+                            code.AppendLine($"errors.Add($\"Unrecognized arguments: Expected exactly {arguments.Count} arguments, but received {{argumentBuffer.Count}}.\");");
                         }
-                        code.AppendLine("else");
+
+                        foreach (var arg in arguments)
+                        {
+                            code.AppendLine();
+                            code.AppendLine($"if (argumentBuffer.Count < {arg.Position + 1})");
+                            using (code.StartBlock())
+                            {
+                                code.AppendLine($"errors.Add($\"Missing required argument <{arg.Name}>\");");
+                            }
+                            code.AppendLine("else");
+                            using (code.StartBlock())
+                            {
+                                GenerateArgumentParser(code, arg, "argumentBuffer", $"{arg.Position}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        code.AppendLine();
+                        code.AppendLine($"if (argumentBuffer.Count < {arguments.Count})");
                         using (code.StartBlock())
                         {
-                            GenerateArgumentParser(code, arg, "argumentBuffer");
+                            code.AppendLine($"errors.Add($\"Too few arguments: At least {arguments.Count} argument(s) are required\");");
+                        }
+
+                        var trailingArgumentCount = arguments.Count - multiValueArg.Position;
+                        for (int i = 0; i < arguments.Count; i++)
+                        {
+                            code.AppendLine();
+                            if (i < multiValueArg.Position)
+                            {
+                                GenerateArgumentParser(code, arguments[i], "argumentBuffer", $"{arguments[i].Position}");
+                            }
+                            else if (i > multiValueArg.Position)
+                            {
+                                GenerateArgumentParser(code, arguments[i], "argumentBuffer", $"argumentBuffer.Count - {arguments.Count - arguments[i].Position}");
+                            }
+                            else
+                            {
+                                code.AppendLine($"global::System.Int32 trailingArgumentsStart = argumentBuffer.Count - {arguments.Count - (arguments[i].Position + 1)};");
+                                code.AppendLine($"for (global::System.Int32 i = {arguments[i].Position}; i < trailingArgumentsStart; i++)");
+                                using (code.StartBlock())
+                                {
+                                    GenerateArgumentParser(code, arguments[i], "argumentBuffer", "i");
+                                }
+                            }
                         }
                     }
 
@@ -2009,15 +2070,15 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         }
     }
 
-    private static void GenerateArgumentParser(CodeBuilder code, ArgumentPropertyModel argModel, string bufferName)
+    private static void GenerateArgumentParser(CodeBuilder code, ArgumentPropertyModel argModel, string bufferName, string index)
     {
         if (argModel.SpecialType == SpecialType.System_String)
         {
-            code.AppendLine($"arg_{argModel.Name} = {bufferName}[{argModel.Position}];");
+            code.AppendLine($"arg_{argModel.Name} = {bufferName}[{index}];");
         }
         else if (argModel.IsEnum)
         {
-            code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>({bufferName}[{argModel.Position}], true, out arg_{argModel.Name}))", applyIndent: true);
+            code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>({bufferName}[{index}], true, out arg_{argModel.Name}))", applyIndent: true);
             using (code.StartBlock())
             {
                 code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
@@ -2025,7 +2086,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         }
         else
         {
-            code.Append($"if (!{argModel.ValueParseMethodName}({bufferName}[{argModel.Position}], out arg_{argModel.Name}", applyIndent: true);
+            code.Append($"if (!{argModel.ValueParseMethodName}({bufferName}[{index}], out arg_{argModel.Name}", applyIndent: true);
             if (argModel.ValueHasErrorMessageOut)
             {
                 code.AppendLine(", out global::System.String customError))", applyIndent: false);

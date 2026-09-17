@@ -99,5 +99,13 @@ namespace Kofoten.NativeCli.Generator.Diagnostics
             category: "Kofoten.NativeCli.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor ImplicitValueNotSupported = new(
+            id: "NCLI013",
+            title: "Implicit value not supported",
+            messageFormat: "Property '{0}' does not support implicit values since it's a collection or dictionary type",
+            category: "Kofoten.NativeCli.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
     }
 }

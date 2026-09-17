@@ -29,3 +29,12 @@ Rule Id | Category | Severity | Notes
 --------|----------|----------|------
 NCLI010 | Kofoten.NativeCli.Generator | Error | NCLI010_Kofoten.NativeCli.Generator, [Documentation](https://github.com/Kofoten/native-cli/blob/main/README.md#analyzer-diagnostic-codes)
 NCLI011 | Kofoten.NativeCli.Generator | Warning | NCLI011_Kofoten.NativeCli.Generator, [Documentation](https://github.com/Kofoten/native-cli/blob/main/README.md#analyzer-diagnostic-codes)
+
+## Release 0.0.13
+
+### New Rules
+
+Rule Id | Category | Severity | Notes
+--------|----------|----------|------
+NCLI012 | Kofoten.NativeCli.Generator | Error | NCLI012_Kofoten.NativeCli.Generator, [Documentation](https://github.com/Kofoten/native-cli/blob/main/README.md#analyzer-diagnostic-codes)
+NCLI013 | Kofoten.NativeCli.Generator | Error | NCLI013_Kofoten.NativeCli.Generator, [Documentation](https://github.com/Kofoten/native-cli/blob/main/README.md#analyzer-diagnostic-codes)

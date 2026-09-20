@@ -1183,8 +1183,17 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 var arguments = command.Properties.OfType<ArgumentPropertyModel>().OrderBy(p => p.Position).ToList();
                 var options = command.Properties.OfType<OptionPropertyModel>().OrderBy(p => p.OptionName).ToList();
 
-                var argumentNameLength = arguments.Max(a => a.Name.Length) + 4;
-                var optionNameLength = options.Max(o => o.OptionName.Length) + 4;
+                var argumentNameLength = 0;
+                if (arguments.Count > 0)
+                {
+                    argumentNameLength = arguments.Max(a => a.Name.Length) + 4;
+                }
+
+                var optionNameLength = 0;
+                if (options.Count > 0)
+                {
+                    optionNameLength = options.Max(o => o.OptionName.Length) + 4;
+                }
 
                 code.AppendLine("private const global::System.String HelpArgumentAndOptions = @\"");
                 if (arguments.Count != 0)
@@ -1317,7 +1326,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                         else
                         {
-                            code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default!;");
+                            code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default;");
                         }
 
                         if (arg.IsFlagsEnum)
@@ -1346,7 +1355,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                         else
                         {
-                            code.AppendLine($"{opt.TypeName} opt_{opt.Name} = default!;");
+                            code.AppendLine($"{opt.TypeName} opt_{opt.Name} = default;");
                         }
 
                         if (opt.IsFlagsEnum)

@@ -2,7 +2,7 @@
 
 namespace Kofoten.NativeCli.Generator.Tests
 {
-    internal class OptionsTestCommand
+    internal class OptionsTestCommand : ICliCommand
     {
         [CliOption("string-test", Short = 's')]
         internal string StringTest { get; set; }
@@ -12,5 +12,10 @@ namespace Kofoten.NativeCli.Generator.Tests
 
         [CliOption("datetime-test")]
         internal DateTime DateTimeTest { get; set; }
+
+        public int Execute()
+        {
+            return 0;
+        }
     }
 }

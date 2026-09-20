@@ -1,21 +1,19 @@
 ﻿using Kofoten.NativeCli;
-using Kofoten.NativeCli.NetstandardTest;
+using Kofoten.NativeCli.Generator.Tests;
 using System;
 
 public class Program
 {
     public static int Main(string[] args)
     {
-        var imaginaryService = new object();
-
         try
         {
             // Let's test the happy path with the greedy collection and both boolean flags
-            string[] simulatedArgs = new string[] { "10", "20", "-a", "5", "15", "--verbose", "--table" };
+            string[] simulatedArgs = new string[] { "-s", "text", "-i", "5", "--datetime-test", "2026-09-20 23:30:00" };
 
             Console.WriteLine($"Simulating single command app args: {string.Join(" ", simulatedArgs)}\n");
 
-            var command = AdditionCommandParser.Parse(simulatedArgs, imaginaryService);
+            var command = OptionsTestCommandParser.Parse(simulatedArgs);
 
             // Execute your handcrafted logic!
             command.Execute();
@@ -34,15 +32,15 @@ public class Program
         try
         {
             // Let's test the happy path with the greedy collection and both boolean flags
-            string[] simulatedArgs = new string[] { "math", "add", "10", "20", "-a", "5", "15", "--verbose", "--table" };
+            string[] simulatedArgs = new string[] { "test", "options", "-s", "text", "-i", "5", "--datetime-test", "2026-09-20 23:30:00" };
 
             Console.WriteLine($"Simulating multi command app args: {string.Join(" ", simulatedArgs)}\n");
 
             var builder = CliCommandBuilder.Configure(router =>
             {
-                router.Map("math", sr =>
+                router.Map("test", sr =>
                 {
-                    sr.MapAdditionCommand("add", imaginaryService);
+                    sr.MapOptionsTestCommand("options");
                 });
             }, ExceptionHandler);
 

@@ -13,7 +13,7 @@
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/Kofoten/native-cli</PackageProjectUrl>
-	<RepositoryUrl>https://github.com/Kofoten/native-cli</RepositoryUrl>
+    <RepositoryUrl>https://github.com/Kofoten/native-cli</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 

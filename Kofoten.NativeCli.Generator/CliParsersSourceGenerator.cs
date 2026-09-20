@@ -1302,7 +1302,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     code.AppendLine();
 
                     code.AppendLine("global::System.Collections.Generic.List<global::System.String> errors = new global::System.Collections.Generic.List<global::System.String>();");
-                    code.AppendLine("global::System.Collections.Generic.List<global::System.String> argumentBuffer = new global::System.Collections.Generic.List<global::System.String>();");
+                    code.AppendLine("global::System.Collections.Generic.List<global::Kofoten.NativeCli.Internal.CliToken> argumentBuffer = new global::System.Collections.Generic.List<global::Kofoten.NativeCli.Internal.CliToken>();");
                     code.AppendLine();
 
                     foreach (var arg in arguments)
@@ -1318,6 +1318,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         else
                         {
                             code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default!;");
+                        }
+
+                        if (arg.IsFlagsEnum)
+                        {
+                            code.AppendLine($"global::System.Boolean arg_{arg.Name}_touched = false;");
                         }
                     }
 
@@ -1456,7 +1461,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     code.AppendLine("case -1:");
                                     using (code.Indent())
                                     {
-                                        code.AppendLine("argumentBuffer.Add(token.GetTokenString(args));");
+                                        code.AppendLine("argumentBuffer.Add(token);");
                                         code.AppendLine("break;");
                                     }
 
@@ -1536,7 +1541,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             code.AppendLine("else");
                             using (code.StartBlock())
                             {
-                                GenerateArgumentParser(code, arg, "argumentBuffer", $"{arg.Position}");
+                                GenerateArgumentParser(code, arg, $"{arg.Position}");
                             }
                         }
                     }
@@ -1555,11 +1560,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             code.AppendLine();
                             if (i < multiValueArg.Position)
                             {
-                                GenerateArgumentParser(code, arguments[i], "argumentBuffer", $"{arguments[i].Position}");
+                                GenerateArgumentParser(code, arguments[i], $"{arguments[i].Position}");
                             }
                             else if (i > multiValueArg.Position)
                             {
-                                GenerateArgumentParser(code, arguments[i], "argumentBuffer", $"argumentBuffer.Count - {arguments.Count - arguments[i].Position}");
+                                GenerateArgumentParser(code, arguments[i], $"argumentBuffer.Count - {arguments.Count - arguments[i].Position}");
                             }
                             else
                             {
@@ -1567,7 +1572,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                 code.AppendLine($"for (global::System.Int32 i = {arguments[i].Position}; i < trailingArgumentsStart; i++)");
                                 using (code.StartBlock())
                                 {
-                                    GenerateArgumentParser(code, arguments[i], "argumentBuffer", "i");
+                                    GenerateArgumentParser(code, arguments[i], "i");
                                 }
                             }
                         }
@@ -1578,6 +1583,34 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     using (code.StartBlock())
                     {
                         var hasFinalizedCollections = false;
+
+                        foreach (var collectionArg in arguments.Where(a => a.IsCollection))
+                        {
+                            hasFinalizedCollections = true;
+
+                            switch (collectionArg.CollectionType)
+                            {
+                                case CollectionType.Array:
+                                    code.AppendLine($"{collectionArg.TypeName} finalArg_{collectionArg.Name} = arg_{collectionArg.Name}.ToArray();");
+                                    break;
+                                case CollectionType.ConstructorCompatible:
+                                    code.AppendLine($"{collectionArg.TypeName} finalArg_{collectionArg.Name} = new {collectionArg.TypeName}(arg_{collectionArg.Name});");
+                                    break;
+                                case CollectionType.ImmutableArray:
+                                    code.AppendLine($"{collectionArg.TypeName} finalArg_{collectionArg.Name} = global::System.Collections.Immutable.ImmutableArray.CreateRange<{collectionArg.ValueTypeName}>(arg_{collectionArg.Name});");
+                                    break;
+                                case CollectionType.ImmutableList:
+                                    code.AppendLine($"{collectionArg.TypeName} finalArg_{collectionArg.Name} = global::System.Collections.Immutable.ImmutableList.CreateRange<{collectionArg.ValueTypeName}>(arg_{collectionArg.Name});");
+                                    break;
+                                case CollectionType.ImmutableHashSet:
+                                    code.AppendLine($"{collectionArg.TypeName} finalArg_{collectionArg.Name} = global::System.Collections.Immutable.ImmutableHashSet.CreateRange<{collectionArg.ValueTypeName}>(arg_{collectionArg.Name});");
+                                    break;
+                                case CollectionType.FrozenSet:
+                                    code.AppendLine($"{collectionArg.TypeName} finalArg_{collectionArg.Name} = global::System.Collections.Frozen.FrozenSet.ToFrozenSet<{collectionArg.ValueTypeName}>(arg_{collectionArg.Name});");
+                                    break;
+                            }
+                        }
+
                         foreach (var collectionOpt in options.Where(o => o.IsCollection))
                         {
                             hasFinalizedCollections = true;
@@ -1606,6 +1639,43 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
 
                         var hasFinalizedDictionaries = false;
+
+                        foreach (var dictionaryArg in arguments.Where(a => a.IsDictionary))
+                        {
+                            hasFinalizedDictionaries = true;
+
+                            switch (dictionaryArg.CollectionType)
+                            {
+                                case CollectionType.Array:
+                                    code.AppendLine($"{dictionaryArg.TypeName} finalArg_{dictionaryArg.Name} = arg_{dictionaryArg.Name}.ToArray();");
+                                    break;
+                                case CollectionType.ConstructorCompatible:
+                                    code.AppendLine($"{dictionaryArg.TypeName} finalArg_{dictionaryArg.Name} = new {dictionaryArg.TypeName}(arg_{dictionaryArg.Name});");
+                                    break;
+                                case CollectionType.ImmutableArray:
+                                    code.AppendLine($"{dictionaryArg.TypeName} finalArg_{dictionaryArg.Name} = global::System.Collections.Immutable.ImmutableArray.CreateRange<global::System.Collections.Generic.KeyValuePair<{dictionaryArg.KeyTypeName}, {dictionaryArg.ValueTypeName}>>(arg_{dictionaryArg.Name});");
+                                    break;
+                                case CollectionType.ImmutableList:
+                                    code.AppendLine($"{dictionaryArg.TypeName} finalArg_{dictionaryArg.Name} = global::System.Collections.Immutable.ImmutableList.CreateRange<global::System.Collections.Generic.KeyValuePair<{dictionaryArg.KeyTypeName}, {dictionaryArg.ValueTypeName}>>(arg_{dictionaryArg.Name});");
+                                    break;
+                                case CollectionType.ImmutableHashSet:
+                                    code.AppendLine($"{dictionaryArg.TypeName} finalArg_{dictionaryArg.Name} = global::System.Collections.Immutable.ImmutableHashSet.CreateRange<global::System.Collections.Generic.KeyValuePair<{dictionaryArg.KeyTypeName}, {dictionaryArg.ValueTypeName}>>(arg_{dictionaryArg.Name});");
+                                    break;
+                                case CollectionType.ImmutableDictionary:
+                                    code.AppendLine($"{dictionaryArg.TypeName} finalArg_{dictionaryArg.Name} = global::System.Collections.Immutable.ImmutableDictionary<{dictionaryArg.KeyTypeName}, {dictionaryArg.ValueTypeName}>.Empty.SetItems(arg_{dictionaryArg.Name});");
+                                    break;
+                                case CollectionType.FrozenSet:
+                                    code.AppendLine($"{dictionaryArg.TypeName} finalArg_{dictionaryArg.Name} = global::System.Collections.Frozen.FrozenSet.ToFrozenSet<global::System.Collections.Generic.KeyValuePair<{dictionaryArg.KeyTypeName}, {dictionaryArg.ValueTypeName}>>(arg_{dictionaryArg.Name});");
+                                    break;
+                                case CollectionType.FrozenDictionary:
+                                    code.AppendLine($"{dictionaryArg.TypeName} finalArg_{dictionaryArg.Name} = global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary<{dictionaryArg.KeyTypeName}, {dictionaryArg.ValueTypeName}>(arg_{dictionaryArg.Name});");
+                                    break;
+                                case CollectionType.DictionaryCompatible:
+                                    code.AppendLine($"global::System.Collections.Generic.Dictionary<{dictionaryArg.KeyTypeName}, {dictionaryArg.ValueTypeName}> finalArg_{dictionaryArg.Name} = global::Kofoten.NativeCli.Internal.GeneratorHelperSources.CreateDictionaryWithOverwrite<{dictionaryArg.KeyTypeName}, {dictionaryArg.ValueTypeName}>(arg_{dictionaryArg.Name});");
+                                    break;
+                            }
+                        }
+
                         foreach (var dictionaryOpt in options.Where(o => o.IsDictionary))
                         {
                             hasFinalizedDictionaries = true;
@@ -1656,6 +1726,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             {
                                 code.AppendLine(prop switch
                                 {
+                                    ArgumentPropertyModel apm when IsFinalized(apm) => $"{prop.Name} = finalArg_{prop.Name},",
                                     ArgumentPropertyModel apm => $"{prop.Name} = arg_{prop.Name},",
                                     OptionPropertyModel opm when IsFinalized(opm) => $"{prop.Name} = finalOpt_{prop.Name},",
                                     OptionPropertyModel opm => $"{prop.Name} = opt_{prop.Name},",
@@ -2070,40 +2141,173 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         }
     }
 
-    private static void GenerateArgumentParser(CodeBuilder code, ArgumentPropertyModel argModel, string bufferName, string index)
+    private static void GenerateArgumentParser(CodeBuilder code, ArgumentPropertyModel argModel, string index)
     {
         if (argModel.SpecialType == SpecialType.System_String)
         {
-            code.AppendLine($"arg_{argModel.Name} = {bufferName}[{index}];");
+            code.AppendLine($"arg_{argModel.Name} = argumentBuffer[{index}].GetTokenString(args);");
+            return;
         }
-        else if (argModel.IsEnum)
+
+        if (argModel.ValueSpecialType == SpecialType.System_String && argModel.IsCollection)
         {
-            code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>({bufferName}[{index}], true, out arg_{argModel.Name}))", applyIndent: true);
-            using (code.StartBlock())
-            {
-                code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
-            }
+            code.AppendLine($"arg_{argModel.Name}.Add(argumentBuffer[{index}].GetTokenString(args));");
+            return;
+        }
+
+        IDisposable? dictionaryBlock = null;
+        if (argModel.IsEnum)
+        {
+            code.AppendLine($"if (global::System.Enum.TryParse<{argModel.ValueTypeName}>(argumentBuffer[{index}].GetTokenString(args), true, out {argModel.ValueTypeName} av{argModel.Position}))");
         }
         else
         {
-            code.Append($"if (!{argModel.ValueParseMethodName}({bufferName}[{index}], out arg_{argModel.Name}", applyIndent: true);
-            if (argModel.ValueHasErrorMessageOut)
+            if (argModel.IsDictionary)
             {
-                code.AppendLine(", out global::System.String customError))", applyIndent: false);
+                code.AppendLine("global::System.String currentArg = {bufferName}[{index}];");
+                code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
+                code.AppendLine();
+                code.AppendLine("if (delimiterIndex == -1)");
                 using (code.StartBlock())
                 {
-                    code.AppendLine($"errors.Add(\"Failed to parse argument {argModel.Name}: {{customError}}\");");
+                    code.AppendLine($"errors.Add($\"Invalid format ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}. A key value pair must be delimitered using the equals sign.\");");
                 }
+                code.AppendLine("else");
+                dictionaryBlock = code.StartBlock();
+
+                code.AppendLine("global::System.Boolean isValidKVP = true;");
+                code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
+                code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
+
+                code.AppendLine();
+                code.AppendLine("if (string.IsNullOrEmpty(keyPart))");
+                using (code.StartBlock())
+                {
+                    code.AppendLine($"errors.Add($\"Invalid format ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}. A key value pair must have a non-empty key.\");");
+                    code.AppendLine("isValidKVP = false;");
+                }
+
+                code.AppendLine();
+                if (argModel.KeySpecialType != SpecialType.System_String)
+                {
+                    code.Append($"if (!{argModel.KeyParseMethodName}(keyPart, out {argModel.KeyTypeName} ak{argModel.Position}", applyIndent: true);
+
+                    if (argModel.KeyHasErrorMessageOut)
+                    {
+                        code.Append(", out global::System.String customError");
+                    }
+
+                    code.AppendLine("))", applyIndent: false);
+                    using (code.StartBlock())
+                    {
+                        if (argModel.KeyHasErrorMessageOut)
+                        {
+                            code.AppendLine($"errors.Add($\"Failed to parse key for argument '{argModel.Name}': {{customError}}\");");
+                        }
+                        else
+                        {
+                            code.AppendLine($"errors.Add($\"Invalid {argModel.KeyTypeName} key ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}.\");");
+                        }
+                        code.AppendLine("isValidKVP = false;");
+                    }
+
+                    code.AppendLine();
+                }
+
+                if (argModel.ValueSpecialType != SpecialType.System_String)
+                {
+                    code.Append($"if (!{argModel.ValueParseMethodName}(valuePart, out {argModel.ValueTypeName} av{argModel.Position}", applyIndent: true);
+
+                    if (argModel.ValueHasErrorMessageOut)
+                    {
+                        if (argModel.KeyHasErrorMessageOut && argModel.KeySpecialType != SpecialType.System_String)
+                        {
+                            code.Append(", out customError");
+                        }
+                        else
+                        {
+                            code.Append(", out global::System.String customError");
+                        }
+                    }
+
+                    code.AppendLine("))", applyIndent: false);
+                    using (code.StartBlock())
+                    {
+                        if (argModel.ValueHasErrorMessageOut)
+                        {
+                            code.AppendLine($"errors.Add($\"Failed to parse argument '{argModel.Name}': {{customError}}\");");
+                        }
+                        else
+                        {
+                            code.AppendLine($"errors.Add($\"Invalid {argModel.ValueTypeName} value ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}.\");");
+                        }
+                        code.AppendLine("isValidKVP = false;");
+                    }
+
+                    code.AppendLine();
+                }
+
+                code.AppendLine("if (isValidKVP)");
             }
             else
             {
+                code.Append($"if ({argModel.ValueParseMethodName}(argumentBuffer[{index}].GetTokenString(args), out {argModel.ValueTypeName} av{argModel.Position}", applyIndent: true);
+
+                if (argModel.ValueHasErrorMessageOut)
+                {
+                    code.Append(", out global::System.String customError");
+                }
+
                 code.AppendLine("))", applyIndent: false);
+            }
+        }
+
+        using (code.StartBlock())
+        {
+            if (argModel.IsFlagsEnum)
+            {
+                code.AppendLine($"if (!arg_{argModel.Name}_touched)");
                 using (code.StartBlock())
                 {
-                    code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
+                    code.AppendLine($"arg_{argModel.Name} = default;");
+                    code.AppendLine($"arg_{argModel.Name}_touched = true;");
+                }
+                code.AppendLine($"arg_{argModel.Name} |= av{argModel.Position};");
+            }
+            else if (argModel.IsDictionary)
+            {
+                var keyName = argModel.KeySpecialType == SpecialType.System_String ? "keyPart" : $"ak{argModel.Position}";
+                var valueName = argModel.ValueSpecialType == SpecialType.System_String ? "valuePart" : $"av{argModel.Position}";
+
+                code.AppendLine($"arg_{argModel.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{argModel.KeyTypeName}, {argModel.ValueTypeName}>({keyName}, {valueName}));");
+            }
+            else if (argModel.IsCollection)
+            {
+                code.AppendLine($"arg_{argModel.Name}.Add(av{argModel.Position});");
+            }
+            else
+            {
+                code.AppendLine($"arg_{argModel.Name} = av{argModel.Position};");
+            }
+        }
+
+        if (!argModel.IsDictionary)
+        {
+            code.AppendLine("else");
+            using (code.StartBlock())
+            {
+                if (argModel.ValueHasErrorMessageOut)
+                {
+                    code.AppendLine($"errors.Add($\"Failed to parse argument '{argModel.Name}': {{customError}}\");");
+                }
+                else
+                {
+                    code.AppendLine($"errors.Add($\"Invalid {argModel.ValueTypeName} value ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}.\");");
                 }
             }
         }
+
+        dictionaryBlock?.Dispose();
     }
 
     private static void GenerateImplicitValueAssignment(CodeBuilder code, string implicitValueString, OptionPropertyModel model)

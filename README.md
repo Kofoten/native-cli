@@ -360,3 +360,4 @@ To ensure a smooth developer experience, `Kofoten.NativeCli` includes a Roslyn a
 | **NCLI010** | Invalid command accessibility | The command class must be declared as public or internal. | Error |
 | **NCLI011** | Redundant default value | A required argument or option property should not have a default value assigned. | Warning |
 | **NCLI012** | Multiple multi-value arguments | Multiple multi value (e.g., array, list, dictionary or flags enum) properties are decorated with `[CliArgument]`. | Error |
+| **NCLI013** | Implicit value not supported | The property is a collection or dictionary and does not support implicit values. | Error |

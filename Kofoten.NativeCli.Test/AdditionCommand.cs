@@ -1,5 +1,6 @@
 ﻿using Kofoten.NativeCli.Test.Data;
 using System.Collections.Frozen;
+using System.Collections.Immutable;
 
 namespace Kofoten.NativeCli.Test;
 
@@ -12,7 +13,7 @@ internal class AdditionCommand(object imaginaryService) : BaseCommand
     public required int FirstNumber { get; init; }
 
     [CliArgument(1, nameof(ExtraNumbers), Description = "The first number to add.")]
-    public required List<int> ExtraNumbers { get; init; }
+    public required ImmutableArray<int> ExtraNumbers { get; init; }
 
     [CliArgument(2, nameof(SecondNumber), Description = "The second number to add.")]
     public required int SecondNumber { get; init; }

@@ -31,6 +31,7 @@ public static class CliTokenizer
                 {
                     endOfOptionsEncountered = true;
                     yield return new CliToken(CliTokenType.EndOfOptions, i, 0, 2);
+                    continue;
                 }
 
                 int equalsIndex = args.Array[i].IndexOf('=');

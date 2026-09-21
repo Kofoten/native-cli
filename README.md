@@ -325,11 +325,11 @@ There are some limitations in what kind of cli that can be designed. Some limita
 - Use of `--` is required to begin parsing arguments **after** options have been passed and no more options may follow, everything after `--` is treated as arguments.
 - All arguments are considered required, if you want to make an argument optional you must use an option instead.
 - Multiple multi value arguments are not supported. If you want to have multiple multi value arguments you must use options instead or combine options with the single multi value argument property.
+- No middleware or interception pipeline.
+- No implicit support for `-` to indicate reading from stdin. However, a standalone `-` is treated as a value meaning a property can be set to `-` leaving it in your capable hands to redirect the stream source.
 
 ### May change
 
-- No support for `-` to indicate reading from stdin.
-- No middleware or interception pipeline.
 - No global options (currently you can use an abstract `BaseCommand` to achieve similar functionality).
 - Support for custom help text formatters.
 - Optional default version querying via `-v` and `--version` (app scoped, meaning top level router only).

@@ -1100,7 +1100,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         var methods = targetType.GetMembers(methodName).OfType<IMethodSymbol>();
         foreach (var method in methods)
         {
-            if (!method.IsStatic || method.ReturnType.SpecialType != SpecialType.System_Boolean)
+            if (!method.IsStatic
+                ||
+                method.DeclaredAccessibility != Accessibility.Public
+                ||
+                method.ReturnType.SpecialType != SpecialType.System_Boolean)
             {
                 continue;
             }
@@ -1362,6 +1366,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         {
                             code.AppendLine($"global::System.Boolean opt_{opt.Name}_touched = false;");
                         }
+
+                        if (opt.IsRequired)
+                        {
+                            code.AppendLine($"global::System.Boolean opt_{opt.Name}_provided = false;");
+                        }
                     }
 
                     var knownLongOptions = string.Join(", ", options.Select(o => $"\"{o.OptionName}\""));
@@ -1424,6 +1433,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                         using (code.Indent())
                                         {
                                             code.AppendLine($"state = {i + 1};");
+
+                                            if (opt.IsRequired)
+                                            {
+                                                code.AppendLine($"opt_{opt.Name}_provided = true;");
+                                            }
+
                                             if (opt.SpecialType == SpecialType.System_Boolean)
                                             {
                                                 code.AppendLine($"opt_{opt.Name} = true;");
@@ -1529,6 +1544,20 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                     }
 
+                    var requiredOptions = options.Where(o => o.IsRequired).ToList();
+                    if (requiredOptions.Count > 0)
+                    {
+                        code.AppendLine();
+                        foreach (var reqOpt in requiredOptions)
+                        {
+                            code.AppendLine($"if (!opt_{reqOpt.Name}_provided)");
+                            using (code.StartBlock())
+                            {
+                                code.AppendLine($"errors.Add(\"Missing required option '--{reqOpt.OptionName}'\");");
+                            }
+                        }
+                    }
+
                     var multiValueArg = arguments.FirstOrDefault(a => a.IsCollection || a.IsDictionary || a.IsFlagsEnum);
                     if (multiValueArg == null)
                     {
@@ -1563,7 +1592,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             code.AppendLine($"errors.Add($\"Too few arguments: At least {arguments.Count} argument(s) are required\");");
                         }
 
-                        var trailingArgumentCount = arguments.Count - multiValueArg.Position;
                         for (int i = 0; i < arguments.Count; i++)
                         {
                             code.AppendLine();
@@ -1951,12 +1979,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         code.AppendLine($"public global::System.Func<global::System.IServiceProvider, global::Kofoten.NativeCli.Internal.CliParseResult> GetFactoryFunction(global::System.ArraySegment<string> args)");
                         using (code.StartBlock())
                         {
-                            code.AppendLine("return (sp) =>");
+                            code.AppendLine("return (__sp) =>");
                             using (code.StartBlock(addTrailingSemicolon: true))
                             {
                                 foreach (var ctorParam in command.ConstructorParameters)
                                 {
-                                    code.AppendLine($"var {ctorParam.Name} = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<{ctorParam.TypeName}>(sp);");
+                                    code.AppendLine($"var {ctorParam.Name} = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<{ctorParam.TypeName}>(__sp);");
                                 }
 
                                 code.AppendLine();
@@ -1995,65 +2023,70 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         using (code.StartBlock())
         {
             IDisposable? dictionaryBlock = null;
-            if (optModel.IsEnum)
+            if (optModel.IsDictionary)
             {
-                code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(token.GetTokenString(args), true, out {optModel.ValueTypeName} v))");
-            }
-            else
-            {
-                if (optModel.IsDictionary)
+                code.AppendLine("global::System.String currentArg = token.GetTokenString(args);");
+                code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
+                code.AppendLine();
+                code.AppendLine("if (delimiterIndex == -1)");
+                using (code.StartBlock())
                 {
-                    code.AppendLine("global::System.String currentArg = token.GetTokenString(args);");
-                    code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
-                    code.AppendLine();
-                    code.AppendLine("if (delimiterIndex == -1)");
-                    using (code.StartBlock())
+                    code.AppendLine($"errors.Add($\"Invalid format ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}. A key value pair must be delimited using the equals sign.\");");
+                }
+                code.AppendLine("else");
+                dictionaryBlock = code.StartBlock();
+
+                code.AppendLine("global::System.Boolean isValidKVP = true;");
+                code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
+                code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
+
+                code.AppendLine();
+                code.AppendLine("if (string.IsNullOrEmpty(keyPart))");
+                using (code.StartBlock())
+                {
+                    code.AppendLine($"errors.Add($\"Invalid format ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}. A key value pair must have a non-empty key.\");");
+                    code.AppendLine("isValidKVP = false;");
+                }
+
+                code.AppendLine();
+                if (optModel.KeySpecialType != SpecialType.System_String)
+                {
+                    code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
+
+                    if (optModel.KeyHasErrorMessageOut)
                     {
-                        code.AppendLine($"errors.Add($\"Invalid format ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}. A key value pair must be delimitered using the equals sign.\");");
+                        code.Append(", out global::System.String customError");
                     }
-                    code.AppendLine("else");
-                    dictionaryBlock = code.StartBlock();
 
-                    code.AppendLine("global::System.Boolean isValidKVP = true;");
-                    code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
-                    code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
-
-                    code.AppendLine();
-                    code.AppendLine("if (string.IsNullOrEmpty(keyPart))");
+                    code.AppendLine("))", applyIndent: false);
                     using (code.StartBlock())
                     {
-                        code.AppendLine($"errors.Add($\"Invalid format ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}. A key value pair must have a non-empty key.\");");
+                        if (optModel.KeyHasErrorMessageOut)
+                        {
+                            code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
+                        }
+                        else
+                        {
+                            code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
+                        }
                         code.AppendLine("isValidKVP = false;");
                     }
 
                     code.AppendLine();
-                    if (optModel.KeySpecialType != SpecialType.System_String)
+                }
+
+                if (optModel.ValueSpecialType != SpecialType.System_String)
+                {
+                    if (optModel.IsEnum)
                     {
-                        code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
-
-                        if (optModel.KeyHasErrorMessageOut)
-                        {
-                            code.Append(", out global::System.String customError");
-                        }
-
-                        code.AppendLine("))", applyIndent: false);
+                        code.AppendLine($"if (!global::System.Enum.TryParse<{optModel.ValueTypeName}>(valuePart, true, out {optModel.ValueTypeName} v))");
                         using (code.StartBlock())
                         {
-                            if (optModel.KeyHasErrorMessageOut)
-                            {
-                                code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
-                            }
-                            else
-                            {
-                                code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{token.GetTokenString(args)}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
-                            }
+                            code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{valuePart}}) for option '--{optModel.OptionName}' at position {{token.Index}}.\");");
                             code.AppendLine("isValidKVP = false;");
                         }
-
-                        code.AppendLine();
                     }
-
-                    if (optModel.ValueSpecialType != SpecialType.System_String)
+                    else
                     {
                         code.Append($"if (!{optModel.ValueParseMethodName}(valuePart, out {optModel.ValueTypeName} v", applyIndent: true);
 
@@ -2082,23 +2115,27 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             }
                             code.AppendLine("isValidKVP = false;");
                         }
-
-                        code.AppendLine();
                     }
 
-                    code.AppendLine("if (isValidKVP)");
+                    code.AppendLine();
                 }
-                else
+
+                code.AppendLine("if (isValidKVP)");
+            }
+            else if (optModel.IsEnum)
+            {
+                code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(token.GetTokenString(args), true, out {optModel.ValueTypeName} v))");
+            }
+            else
+            {
+                code.Append($"if ({optModel.ValueParseMethodName}(token.GetTokenString(args), out {optModel.ValueTypeName} v", applyIndent: true);
+
+                if (optModel.ValueHasErrorMessageOut)
                 {
-                    code.Append($"if ({optModel.ValueParseMethodName}(token.GetTokenString(args), out {optModel.ValueTypeName} v", applyIndent: true);
-
-                    if (optModel.ValueHasErrorMessageOut)
-                    {
-                        code.Append(", out global::System.String customError");
-                    }
-
-                    code.AppendLine("))", applyIndent: false);
+                    code.Append(", out global::System.String customError");
                 }
+
+                code.AppendLine("))", applyIndent: false);
             }
 
             using (code.StartBlock())
@@ -2165,65 +2202,70 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         }
 
         IDisposable? dictionaryBlock = null;
-        if (argModel.IsEnum)
+        if (argModel.IsDictionary)
         {
-            code.AppendLine($"if (global::System.Enum.TryParse<{argModel.ValueTypeName}>(argumentBuffer[{index}].GetTokenString(args), true, out {argModel.ValueTypeName} av{argModel.Position}))");
-        }
-        else
-        {
-            if (argModel.IsDictionary)
+            code.AppendLine($"global::System.String currentArg = argumentBuffer[{index}].GetTokenString(args);");
+            code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
+            code.AppendLine();
+            code.AppendLine("if (delimiterIndex == -1)");
+            using (code.StartBlock())
             {
-                code.AppendLine("global::System.String currentArg = {bufferName}[{index}];");
-                code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
-                code.AppendLine();
-                code.AppendLine("if (delimiterIndex == -1)");
-                using (code.StartBlock())
+                code.AppendLine($"errors.Add($\"Invalid format ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}. A key value pair must be delimitered using the equals sign.\");");
+            }
+            code.AppendLine("else");
+            dictionaryBlock = code.StartBlock();
+
+            code.AppendLine("global::System.Boolean isValidKVP = true;");
+            code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
+            code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
+
+            code.AppendLine();
+            code.AppendLine("if (string.IsNullOrEmpty(keyPart))");
+            using (code.StartBlock())
+            {
+                code.AppendLine($"errors.Add($\"Invalid format ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}. A key value pair must have a non-empty key.\");");
+                code.AppendLine("isValidKVP = false;");
+            }
+
+            code.AppendLine();
+            if (argModel.KeySpecialType != SpecialType.System_String)
+            {
+                code.Append($"if (!{argModel.KeyParseMethodName}(keyPart, out {argModel.KeyTypeName} ak{argModel.Position}", applyIndent: true);
+
+                if (argModel.KeyHasErrorMessageOut)
                 {
-                    code.AppendLine($"errors.Add($\"Invalid format ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}. A key value pair must be delimitered using the equals sign.\");");
+                    code.Append(", out global::System.String customError");
                 }
-                code.AppendLine("else");
-                dictionaryBlock = code.StartBlock();
 
-                code.AppendLine("global::System.Boolean isValidKVP = true;");
-                code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
-                code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
-
-                code.AppendLine();
-                code.AppendLine("if (string.IsNullOrEmpty(keyPart))");
+                code.AppendLine("))", applyIndent: false);
                 using (code.StartBlock())
                 {
-                    code.AppendLine($"errors.Add($\"Invalid format ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}. A key value pair must have a non-empty key.\");");
+                    if (argModel.KeyHasErrorMessageOut)
+                    {
+                        code.AppendLine($"errors.Add($\"Failed to parse key for argument '{argModel.Name}': {{customError}}\");");
+                    }
+                    else
+                    {
+                        code.AppendLine($"errors.Add($\"Invalid {argModel.KeyTypeName} key ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}.\");");
+                    }
                     code.AppendLine("isValidKVP = false;");
                 }
 
                 code.AppendLine();
-                if (argModel.KeySpecialType != SpecialType.System_String)
+            }
+
+            if (argModel.ValueSpecialType != SpecialType.System_String)
+            {
+                if (argModel.IsEnum)
                 {
-                    code.Append($"if (!{argModel.KeyParseMethodName}(keyPart, out {argModel.KeyTypeName} ak{argModel.Position}", applyIndent: true);
-
-                    if (argModel.KeyHasErrorMessageOut)
-                    {
-                        code.Append(", out global::System.String customError");
-                    }
-
-                    code.AppendLine("))", applyIndent: false);
+                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>(valuePart, true, out {argModel.ValueTypeName} av{argModel.Position}))");
                     using (code.StartBlock())
                     {
-                        if (argModel.KeyHasErrorMessageOut)
-                        {
-                            code.AppendLine($"errors.Add($\"Failed to parse key for argument '{argModel.Name}': {{customError}}\");");
-                        }
-                        else
-                        {
-                            code.AppendLine($"errors.Add($\"Invalid {argModel.KeyTypeName} key ({{argumentBuffer[{index}].GetTokenString(args)}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}.\");");
-                        }
+                        code.AppendLine($"errors.Add($\"Invalid {argModel.ValueTypeName} value ({{valuePart}}) for argument '{argModel.Name}' at position {{argumentBuffer[{index}].Index}}.\");");
                         code.AppendLine("isValidKVP = false;");
                     }
-
-                    code.AppendLine();
                 }
-
-                if (argModel.ValueSpecialType != SpecialType.System_String)
+                else
                 {
                     code.Append($"if (!{argModel.ValueParseMethodName}(valuePart, out {argModel.ValueTypeName} av{argModel.Position}", applyIndent: true);
 
@@ -2252,23 +2294,27 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                         code.AppendLine("isValidKVP = false;");
                     }
-
-                    code.AppendLine();
                 }
 
-                code.AppendLine("if (isValidKVP)");
+                code.AppendLine();
             }
-            else
+
+            code.AppendLine("if (isValidKVP)");
+        }
+        else if (argModel.IsEnum)
+        {
+            code.AppendLine($"if (global::System.Enum.TryParse<{argModel.ValueTypeName}>(argumentBuffer[{index}].GetTokenString(args), true, out {argModel.ValueTypeName} av{argModel.Position}))");
+        }
+        else
+        {
+            code.Append($"if ({argModel.ValueParseMethodName}(argumentBuffer[{index}].GetTokenString(args), out {argModel.ValueTypeName} av{argModel.Position}", applyIndent: true);
+
+            if (argModel.ValueHasErrorMessageOut)
             {
-                code.Append($"if ({argModel.ValueParseMethodName}(argumentBuffer[{index}].GetTokenString(args), out {argModel.ValueTypeName} av{argModel.Position}", applyIndent: true);
-
-                if (argModel.ValueHasErrorMessageOut)
-                {
-                    code.Append(", out global::System.String customError");
-                }
-
-                code.AppendLine("))", applyIndent: false);
+                code.Append(", out global::System.String customError");
             }
+
+            code.AppendLine("))", applyIndent: false);
         }
 
         using (code.StartBlock())
